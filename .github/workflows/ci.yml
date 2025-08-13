@@ -1,28 +1,34 @@
-# .github/workflows/ci.yml
+# CI workflow to enforce required "build" check for branch protection
+
 name: CI
+
+# Trigger on pull request events
 on:
   pull_request:
 
+# Minimal permissions for security
+permissions:
+  contents: read
+
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    # This job name becomes the status check name ("build")
-    concurrency:
-      group: pr-${{ github.event.pull_request.head.sha || github.sha }}
-      cancel-in-progress: true   # ~ auto_cancel_pending_pipelines
+  build:                     # Job name must match REQUIRED_CHECK_NAME=build
+    runs-on: ubuntu-latest   # Use latest Ubuntu runner
+    timeout-minutes: 20      # Cancel job if it runs too long
+
+    concurrency:             # Auto-cancel older runs of same PR branch
+      group: pr-${{ github.head_ref || github.ref }}
+      cancel-in-progress: true
 
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0         # ~ build_git_strategy: fetch
+          fetch-depth: 0     # Fetch full history (GitLab: build_git_strategy: fetch)
 
-      # Optional: separate caches per job/key
       - uses: actions/cache@v4
         with:
           path: ~/.cache/yourtool
-          key: build-${{ runner.os }}-${{ hashFiles('**/lockfiles') }}
+          key: build-${{ runner.os }}-${{ hashFiles('**/package-lock.json', '**/yarn.lock', '**/pnpm-lock.yaml', '**/poetry.lock', '**/requirements*.txt') }}  # Separate caches per branch
 
       - name: Run build/test
         run: |
-          echo "Run your build/tests here"
-          # exit non-zero on failure to fail the check
+          echo "Run your build/tests here"  # Replace with actual build/test commands
