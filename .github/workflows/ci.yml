@@ -1,34 +1,79 @@
-# CI workflow to enforce required "build" check for branch protection
+# CI/CD with required "build" check + protected deploy + manual rollback
 
-name: CI
+name: CI-CD
 
-# Trigger on pull request events
+# PRs run CI; pushes to master deploy; manual trigger supports rollback
 on:
   pull_request:
+  push:
+    branches: [ master ]
+  workflow_dispatch:
+    inputs:
+      rollback_sha:
+        description: "Commit/Tag/Release to rollback to"
+        required: true
+        default: ""
 
-# Minimal permissions for security
+# Minimal permissions; deployments:write required for env deploys
 permissions:
   contents: read
+  deployments: write
 
 jobs:
-  build:                     # Job name must match REQUIRED_CHECK_NAME=build
-    runs-on: ubuntu-latest   # Use latest Ubuntu runner
-    timeout-minutes: 20      # Cancel job if it runs too long
-
-    concurrency:             # Auto-cancel older runs of same PR branch
+  build:                             # Must match REQUIRED_CHECK_NAME=build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:                     # Auto-cancel older runs for same PR
       group: pr-${{ github.head_ref || github.ref }}
       cancel-in-progress: true
-
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0     # Fetch full history (GitLab: build_git_strategy: fetch)
-
+          fetch-depth: 0             # ~ GitLab build_git_strategy: fetch
       - uses: actions/cache@v4
         with:
           path: ~/.cache/yourtool
-          key: build-${{ runner.os }}-${{ hashFiles('**/package-lock.json', '**/yarn.lock', '**/pnpm-lock.yaml', '**/poetry.lock', '**/requirements*.txt') }}  # Separate caches per branch
-
+          key: build-${{ runner.os }}-${{ hashFiles('**/package-lock.json', '**/yarn.lock', '**/pnpm-lock.yaml', '**/poetry.lock', '**/requirements*.txt') }}  # ~ ci_separated_caches
       - name: Run build/test
         run: |
-          echo "Run your build/tests here"  # Replace with actual build/test commands
+          echo "Run your build/tests here"
+          # exit non-zero to fail the 'build' check if tests fail
+
+  deploy_production:                 # Protected deployment to 'production'
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/master')  # Deploy only from master pushes
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:                     # Requires repo Settings > Environments protection
+      name: production               # Add required reviewers in UI to gate deployment
+      url: https://example.com       # Optional: deployment URL
+    concurrency:                     # Prevent parallel deploys
+      group: deploy-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Deploy
+        run: |
+          echo "Deploying commit $GITHUB_SHA to production"
+          # run your real deploy commands here (e.g., kubectl/terraform/ansible/cli)
+
+  rollback_production:               # Manual rollback job
+    if: github.event_name == 'workflow_dispatch' && inputs.rollback_sha != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: production               # Same protected env; reviewers can gate rollback too
+    concurrency:
+      group: deploy-production       # Serializes with deploy job
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.rollback_sha }}  # Checkout the requested version
+      - name: Rollback
+        run: |
+          echo "Rolling back to ${{ inputs.rollback_sha }}"
+          # run your real rollback commands here (e.g., redeploy previous image/tag)
