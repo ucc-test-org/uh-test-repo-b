@@ -1,25 +1,28 @@
+# .github/workflows/ci.yml
 name: CI
 on:
   pull_request:
-    branches: [ main, master, development ]
-
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - run: echo "Build OK"
+    # This job name becomes the status check name ("build")
+    concurrency:
+      group: pr-${{ github.event.pull_request.head.sha || github.sha }}
+      cancel-in-progress: true   # ~ auto_cancel_pending_pipelines
 
-  test:
-    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
-      - run: echo "Tests OK"
+          fetch-depth: 0         # ~ build_git_strategy: fetch
+
+      # Optional: separate caches per job/key
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/yourtool
+          key: build-${{ runner.os }}-${{ hashFiles('**/lockfiles') }}
+
+      - name: Run build/test
+        run: |
+          echo "Run your build/tests here"
+          # exit non-zero on failure to fail the check
